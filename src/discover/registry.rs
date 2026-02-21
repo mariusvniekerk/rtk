@@ -4,6 +4,8 @@ use regex::{Regex, RegexSet};
 /// A rule mapping a shell command pattern to its RTK equivalent.
 struct RtkRule {
     rtk_cmd: &'static str,
+    /// Original command prefixes to replace with rtk_cmd (longest first for correct matching).
+    rewrite_prefixes: &'static [&'static str],
     category: &'static str,
     savings_pct: f64,
     subcmd_savings: &'static [(&'static str, f64)],
@@ -75,6 +77,7 @@ const PATTERNS: &[&str] = &[
 const RULES: &[RtkRule] = &[
     RtkRule {
         rtk_cmd: "rtk git",
+        rewrite_prefixes: &["git"],
         category: "Git",
         savings_pct: 70.0,
         subcmd_savings: &[
@@ -87,6 +90,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk gh",
+        rewrite_prefixes: &["gh"],
         category: "GitHub",
         savings_pct: 82.0,
         subcmd_savings: &[("pr", 87.0), ("run", 82.0), ("issue", 80.0)],
@@ -94,6 +98,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk cargo",
+        rewrite_prefixes: &["cargo"],
         category: "Cargo",
         savings_pct: 80.0,
         subcmd_savings: &[("test", 90.0), ("check", 80.0)],
@@ -101,6 +106,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk pnpm",
+        rewrite_prefixes: &["pnpm"],
         category: "PackageManager",
         savings_pct: 80.0,
         subcmd_savings: &[],
@@ -108,6 +114,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk npm",
+        rewrite_prefixes: &["npm"],
         category: "PackageManager",
         savings_pct: 70.0,
         subcmd_savings: &[],
@@ -115,6 +122,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk npx",
+        rewrite_prefixes: &["npx"],
         category: "PackageManager",
         savings_pct: 70.0,
         subcmd_savings: &[],
@@ -122,6 +130,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk read",
+        rewrite_prefixes: &["cat", "head", "tail"],
         category: "Files",
         savings_pct: 60.0,
         subcmd_savings: &[],
@@ -129,6 +138,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk grep",
+        rewrite_prefixes: &["rg", "grep"],
         category: "Files",
         savings_pct: 75.0,
         subcmd_savings: &[],
@@ -136,6 +146,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk ls",
+        rewrite_prefixes: &["ls"],
         category: "Files",
         savings_pct: 65.0,
         subcmd_savings: &[],
@@ -143,13 +154,16 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk find",
+        rewrite_prefixes: &["find"],
         category: "Files",
         savings_pct: 70.0,
         subcmd_savings: &[],
         subcmd_status: &[],
     },
     RtkRule {
+        // Longest prefixes first for correct matching
         rtk_cmd: "rtk tsc",
+        rewrite_prefixes: &["pnpm tsc", "npx tsc", "tsc"],
         category: "Build",
         savings_pct: 83.0,
         subcmd_savings: &[],
@@ -157,6 +171,14 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk lint",
+        rewrite_prefixes: &[
+            "npx eslint",
+            "pnpm lint",
+            "npx biome",
+            "eslint",
+            "biome",
+            "lint",
+        ],
         category: "Build",
         savings_pct: 84.0,
         subcmd_savings: &[],
@@ -164,13 +186,16 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk prettier",
+        rewrite_prefixes: &["npx prettier", "pnpm prettier", "prettier"],
         category: "Build",
         savings_pct: 70.0,
         subcmd_savings: &[],
         subcmd_status: &[],
     },
     RtkRule {
+        // "next build" is stripped to "rtk next" — the build subcommand is internal
         rtk_cmd: "rtk next",
+        rewrite_prefixes: &["npx next build", "pnpm next build", "next build"],
         category: "Build",
         savings_pct: 87.0,
         subcmd_savings: &[],
@@ -178,6 +203,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk vitest",
+        rewrite_prefixes: &["pnpm vitest", "npx vitest", "vitest", "jest"],
         category: "Tests",
         savings_pct: 99.0,
         subcmd_savings: &[],
@@ -185,6 +211,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk playwright",
+        rewrite_prefixes: &["npx playwright", "pnpm playwright", "playwright"],
         category: "Tests",
         savings_pct: 94.0,
         subcmd_savings: &[],
@@ -192,6 +219,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk prisma",
+        rewrite_prefixes: &["npx prisma", "pnpm prisma", "prisma"],
         category: "Build",
         savings_pct: 88.0,
         subcmd_savings: &[],
@@ -199,6 +227,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk docker",
+        rewrite_prefixes: &["docker"],
         category: "Infra",
         savings_pct: 85.0,
         subcmd_savings: &[],
@@ -206,6 +235,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk kubectl",
+        rewrite_prefixes: &["kubectl"],
         category: "Infra",
         savings_pct: 85.0,
         subcmd_savings: &[],
@@ -213,6 +243,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk curl",
+        rewrite_prefixes: &["curl"],
         category: "Network",
         savings_pct: 70.0,
         subcmd_savings: &[],
@@ -220,6 +251,7 @@ const RULES: &[RtkRule] = &[
     },
     RtkRule {
         rtk_cmd: "rtk wget",
+        rewrite_prefixes: &["wget"],
         category: "Network",
         savings_pct: 65.0,
         subcmd_savings: &[],
@@ -486,6 +518,202 @@ pub fn split_command_chain(cmd: &str) -> Vec<&str> {
     results
 }
 
+/// Rewrite a raw command to its RTK equivalent.
+///
+/// Returns `Some(rewritten)` if the command has an RTK equivalent or is already RTK.
+/// Returns `None` if the command is unsupported or ignored (hook should pass through).
+///
+/// Handles compound commands (`&&`, `||`, `;`) by rewriting each segment independently.
+/// For pipes (`|`), only rewrites the first command (the filter stays raw).
+pub fn rewrite_command(cmd: &str) -> Option<String> {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Heredoc or arithmetic expansion — unsafe to split/rewrite
+    if trimmed.contains("<<") || trimmed.contains("$((") {
+        return None;
+    }
+
+    // Simple (non-compound) already-RTK command — return as-is.
+    // For compound commands that start with "rtk" (e.g. "rtk git add . && cargo test"),
+    // fall through to rewrite_compound so the remaining segments get rewritten.
+    let has_compound = trimmed.contains("&&")
+        || trimmed.contains("||")
+        || trimmed.contains(';')
+        || trimmed.contains('|');
+    if !has_compound && (trimmed.starts_with("rtk ") || trimmed == "rtk") {
+        return Some(trimmed.to_string());
+    }
+
+    rewrite_compound(trimmed)
+}
+
+/// Rewrite a compound command (with `&&`, `||`, `;`, `|`) by rewriting each segment.
+fn rewrite_compound(cmd: &str) -> Option<String> {
+    let bytes = cmd.as_bytes();
+    let len = bytes.len();
+    let mut result = String::with_capacity(len + 32);
+    let mut any_changed = false;
+    let mut seg_start = 0;
+    let mut i = 0;
+    let mut in_single = false;
+    let mut in_double = false;
+
+    while i < len {
+        let b = bytes[i];
+        match b {
+            b'\'' if !in_double => {
+                in_single = !in_single;
+                i += 1;
+            }
+            b'"' if !in_single => {
+                in_double = !in_double;
+                i += 1;
+            }
+            b'|' if !in_single && !in_double => {
+                if i + 1 < len && bytes[i + 1] == b'|' {
+                    // `||` operator — rewrite left, continue
+                    let seg = cmd[seg_start..i].trim();
+                    let rewritten = rewrite_segment(seg).unwrap_or_else(|| seg.to_string());
+                    if rewritten != seg {
+                        any_changed = true;
+                    }
+                    result.push_str(&rewritten);
+                    result.push_str(" || ");
+                    i += 2;
+                    while i < len && bytes[i] == b' ' {
+                        i += 1;
+                    }
+                    seg_start = i;
+                } else {
+                    // `|` pipe — rewrite first segment only, pass through the rest unchanged
+                    let seg = cmd[seg_start..i].trim();
+                    let rewritten = rewrite_segment(seg).unwrap_or_else(|| seg.to_string());
+                    if rewritten != seg {
+                        any_changed = true;
+                    }
+                    result.push_str(&rewritten);
+                    // Preserve the space before the pipe that was lost by trim()
+                    result.push(' ');
+                    result.push_str(cmd[i..].trim_start());
+                    return if any_changed { Some(result) } else { None };
+                }
+            }
+            b'&' if !in_single && !in_double && i + 1 < len && bytes[i + 1] == b'&' => {
+                // `&&` operator — rewrite left, continue
+                let seg = cmd[seg_start..i].trim();
+                let rewritten = rewrite_segment(seg).unwrap_or_else(|| seg.to_string());
+                if rewritten != seg {
+                    any_changed = true;
+                }
+                result.push_str(&rewritten);
+                result.push_str(" && ");
+                i += 2;
+                while i < len && bytes[i] == b' ' {
+                    i += 1;
+                }
+                seg_start = i;
+            }
+            b';' if !in_single && !in_double => {
+                // `;` separator
+                let seg = cmd[seg_start..i].trim();
+                let rewritten = rewrite_segment(seg).unwrap_or_else(|| seg.to_string());
+                if rewritten != seg {
+                    any_changed = true;
+                }
+                result.push_str(&rewritten);
+                result.push(';');
+                i += 1;
+                while i < len && bytes[i] == b' ' {
+                    i += 1;
+                }
+                if i < len {
+                    result.push(' ');
+                }
+                seg_start = i;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    // Last (or only) segment
+    let seg = cmd[seg_start..len].trim();
+    let rewritten = rewrite_segment(seg).unwrap_or_else(|| seg.to_string());
+    if rewritten != seg {
+        any_changed = true;
+    }
+    result.push_str(&rewritten);
+
+    if any_changed {
+        Some(result)
+    } else {
+        None
+    }
+}
+
+/// Rewrite a single (non-compound) command segment.
+/// Returns `Some(rewritten)` if matched (including already-RTK pass-through).
+/// Returns `None` if no match (caller uses original segment).
+fn rewrite_segment(seg: &str) -> Option<String> {
+    let trimmed = seg.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Already RTK — pass through unchanged
+    if trimmed.starts_with("rtk ") || trimmed == "rtk" {
+        return Some(trimmed.to_string());
+    }
+
+    // Use classify_command for correct ignore/prefix handling
+    let rtk_equivalent = match classify_command(trimmed) {
+        Classification::Supported { rtk_equivalent, .. } => rtk_equivalent,
+        _ => return None,
+    };
+
+    // Find the matching rule (rtk_cmd values are unique across all rules)
+    let rule = RULES.iter().find(|r| r.rtk_cmd == rtk_equivalent)?;
+
+    // Extract env prefix (sudo, env VAR=val, etc.)
+    let stripped_cow = ENV_PREFIX.replace(trimmed, "");
+    let env_prefix_len = trimmed.len() - stripped_cow.len();
+    let env_prefix = &trimmed[..env_prefix_len];
+    let cmd_clean = stripped_cow.trim();
+
+    // Try each rewrite prefix (longest first) with word-boundary check
+    for &prefix in rule.rewrite_prefixes {
+        if let Some(rest) = strip_word_prefix(cmd_clean, prefix) {
+            let rewritten = if rest.is_empty() {
+                format!("{}{}", env_prefix, rule.rtk_cmd)
+            } else {
+                format!("{}{} {}", env_prefix, rule.rtk_cmd, rest)
+            };
+            return Some(rewritten);
+        }
+    }
+
+    None
+}
+
+/// Strip a command prefix with word-boundary check.
+/// Returns the remainder of the command after the prefix, or `None` if no match.
+fn strip_word_prefix<'a>(cmd: &'a str, prefix: &str) -> Option<&'a str> {
+    if cmd == prefix {
+        Some("")
+    } else if cmd.len() > prefix.len()
+        && cmd.starts_with(prefix)
+        && cmd.as_bytes()[prefix.len()] == b' '
+    {
+        Some(cmd[prefix.len() + 1..].trim_start())
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::report::RtkStatus;
@@ -731,5 +959,144 @@ mod tests {
     fn test_split_heredoc_no_split() {
         let cmd = "cat <<'EOF'\nhello && world\nEOF";
         assert_eq!(split_command_chain(cmd), vec![cmd]);
+    }
+
+    // --- rewrite_command tests ---
+
+    #[test]
+    fn test_rewrite_git_status() {
+        assert_eq!(rewrite_command("git status"), Some("rtk git status".into()));
+    }
+
+    #[test]
+    fn test_rewrite_git_log() {
+        assert_eq!(
+            rewrite_command("git log -10"),
+            Some("rtk git log -10".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_cargo_test() {
+        assert_eq!(rewrite_command("cargo test"), Some("rtk cargo test".into()));
+    }
+
+    #[test]
+    fn test_rewrite_compound_and() {
+        assert_eq!(
+            rewrite_command("git add . && cargo test"),
+            Some("rtk git add . && rtk cargo test".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_compound_three_segments() {
+        assert_eq!(
+            rewrite_command("cargo fmt --all && cargo clippy --all-targets && cargo test"),
+            Some("rtk cargo fmt --all && rtk cargo clippy --all-targets && rtk cargo test".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_already_rtk() {
+        assert_eq!(
+            rewrite_command("rtk git status"),
+            Some("rtk git status".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_unsupported_returns_none() {
+        assert_eq!(rewrite_command("terraform plan"), None);
+    }
+
+    #[test]
+    fn test_rewrite_ignored_cd() {
+        assert_eq!(rewrite_command("cd /tmp"), None);
+    }
+
+    #[test]
+    fn test_rewrite_with_env_prefix() {
+        assert_eq!(
+            rewrite_command("GIT_SSH_COMMAND=ssh git push"),
+            Some("GIT_SSH_COMMAND=ssh rtk git push".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_npx_tsc() {
+        assert_eq!(
+            rewrite_command("npx tsc --noEmit"),
+            Some("rtk tsc --noEmit".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_pnpm_tsc() {
+        assert_eq!(
+            rewrite_command("pnpm tsc --noEmit"),
+            Some("rtk tsc --noEmit".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_cat_file() {
+        assert_eq!(
+            rewrite_command("cat src/main.rs"),
+            Some("rtk read src/main.rs".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_rg_pattern() {
+        assert_eq!(
+            rewrite_command("rg \"fn main\""),
+            Some("rtk grep \"fn main\"".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_npx_playwright() {
+        assert_eq!(
+            rewrite_command("npx playwright test"),
+            Some("rtk playwright test".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_next_build() {
+        assert_eq!(
+            rewrite_command("next build --turbo"),
+            Some("rtk next --turbo".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_pipe_first_only() {
+        // After a pipe, the filter command stays raw
+        assert_eq!(
+            rewrite_command("git log -10 | grep feat"),
+            Some("rtk git log -10 | grep feat".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_heredoc_returns_none() {
+        assert_eq!(rewrite_command("cat <<'EOF'\nfoo\nEOF"), None);
+    }
+
+    #[test]
+    fn test_rewrite_empty_returns_none() {
+        assert_eq!(rewrite_command(""), None);
+        assert_eq!(rewrite_command("   "), None);
+    }
+
+    #[test]
+    fn test_rewrite_mixed_compound_partial() {
+        // First segment already RTK, second gets rewritten
+        assert_eq!(
+            rewrite_command("rtk git add . && cargo test"),
+            Some("rtk git add . && rtk cargo test".into())
+        );
     }
 }
