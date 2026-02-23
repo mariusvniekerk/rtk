@@ -660,7 +660,7 @@ fn run_default_mode(global: bool, patch_mode: PatchMode, verbose: u8) -> Result<
 
     // 1. Prepare hook directory and install hook
     let (_hook_dir, hook_path) = prepare_hook_paths()?;
-    ensure_hook_installed(&hook_path, verbose)?;
+    let hook_changed = ensure_hook_installed(&hook_path, verbose)?;
 
     // 2. Write RTK.md
     write_if_changed(&rtk_md_path, RTK_SLIM, "RTK.md", verbose)?;
@@ -669,7 +669,12 @@ fn run_default_mode(global: bool, patch_mode: PatchMode, verbose: u8) -> Result<
     let migrated = patch_claude_md(&claude_md_path, verbose)?;
 
     // 4. Print success message
-    println!("\nRTK hook installed (global).\n");
+    let hook_status = if hook_changed {
+        "installed/updated"
+    } else {
+        "already up to date"
+    };
+    println!("\nRTK hook {} (global).\n", hook_status);
     println!("  Hook:      {}", hook_path.display());
     println!("  RTK.md:    {} (10 lines)", rtk_md_path.display());
     println!("  CLAUDE.md: @RTK.md reference added");
@@ -717,9 +722,14 @@ fn run_hook_only_mode(global: bool, patch_mode: PatchMode, verbose: u8) -> Resul
 
     // Prepare and install hook
     let (_hook_dir, hook_path) = prepare_hook_paths()?;
-    ensure_hook_installed(&hook_path, verbose)?;
+    let hook_changed = ensure_hook_installed(&hook_path, verbose)?;
 
-    println!("\nRTK hook installed (hook-only mode).\n");
+    let hook_status = if hook_changed {
+        "installed/updated"
+    } else {
+        "already up to date"
+    };
+    println!("\nRTK hook {} (hook-only mode).\n", hook_status);
     println!("  Hook: {}", hook_path.display());
     println!(
         "  Note: No RTK.md created. Claude won't know about meta commands (gain, discover, proxy)."

@@ -542,7 +542,8 @@ pub fn rewrite_command(cmd: &str) -> Option<String> {
     let has_compound = trimmed.contains("&&")
         || trimmed.contains("||")
         || trimmed.contains(';')
-        || trimmed.contains('|');
+        || trimmed.contains('|')
+        || trimmed.contains(" & ");
     if !has_compound && (trimmed.starts_with("rtk ") || trimmed == "rtk") {
         return Some(trimmed.to_string());
     }
@@ -611,6 +612,21 @@ fn rewrite_compound(cmd: &str) -> Option<String> {
                 result.push_str(&rewritten);
                 result.push_str(" && ");
                 i += 2;
+                while i < len && bytes[i] == b' ' {
+                    i += 1;
+                }
+                seg_start = i;
+            }
+            b'&' if !in_single && !in_double => {
+                // single `&` background execution operator
+                let seg = cmd[seg_start..i].trim();
+                let rewritten = rewrite_segment(seg).unwrap_or_else(|| seg.to_string());
+                if rewritten != seg {
+                    any_changed = true;
+                }
+                result.push_str(&rewritten);
+                result.push_str(" & ");
+                i += 1;
                 while i < len && bytes[i] == b' ' {
                     i += 1;
                 }
@@ -1002,6 +1018,31 @@ mod tests {
         assert_eq!(
             rewrite_command("rtk git status"),
             Some("rtk git status".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_background_single_amp() {
+        assert_eq!(
+            rewrite_command("cargo test & git status"),
+            Some("rtk cargo test & rtk git status".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_background_unsupported_right() {
+        assert_eq!(
+            rewrite_command("cargo test & terraform plan"),
+            Some("rtk cargo test & terraform plan".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_background_does_not_affect_double_amp() {
+        // `&&` must still work after adding `&` support
+        assert_eq!(
+            rewrite_command("cargo test && git status"),
+            Some("rtk cargo test && rtk git status".into())
         );
     }
 
