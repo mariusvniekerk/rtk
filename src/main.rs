@@ -858,7 +858,7 @@ impl KubectlGlobalArgs {
 
 #[derive(Subcommand)]
 enum KubectlCommands {
-    /// List pods
+    /// List pods (shorthand for `get pods`)
     Pods {
         #[command(flatten)]
         global: KubectlGlobalArgs,
@@ -866,7 +866,7 @@ enum KubectlCommands {
         #[arg(short = 'A', long)]
         all: bool,
     },
-    /// List services
+    /// List services (shorthand for `get services`)
     Services {
         #[command(flatten)]
         global: KubectlGlobalArgs,
@@ -882,7 +882,35 @@ enum KubectlCommands {
         #[arg(short, long)]
         container: Option<String>,
     },
+    /// Get a resource (kubectl get pods, kubectl get services, ...)
+    Get {
+        #[command(subcommand)]
+        resource: KubectlGetResource,
+    },
     /// Passthrough: runs any unsupported kubectl subcommand directly
+    #[command(external_subcommand)]
+    Other(Vec<OsString>),
+}
+
+#[derive(Subcommand)]
+enum KubectlGetResource {
+    /// List pods with filtered output
+    Pods {
+        #[command(flatten)]
+        global: KubectlGlobalArgs,
+        /// All namespaces
+        #[arg(short = 'A', long)]
+        all: bool,
+    },
+    /// List services with filtered output
+    Services {
+        #[command(flatten)]
+        global: KubectlGlobalArgs,
+        /// All namespaces
+        #[arg(short = 'A', long)]
+        all: bool,
+    },
+    /// Passthrough: runs any unsupported kubectl get resource directly
     #[command(external_subcommand)]
     Other(Vec<OsString>),
 }
@@ -1601,6 +1629,27 @@ fn main() -> Result<()> {
                 }
                 container::run(container::ContainerCmd::KubectlLogs, &args, cli.verbose)?;
             }
+            KubectlCommands::Get { resource } => match resource {
+                KubectlGetResource::Pods { global, all } => {
+                    let mut args = global.to_args();
+                    if all {
+                        args.push("-A".to_string());
+                    }
+                    container::run(container::ContainerCmd::KubectlPods, &args, cli.verbose)?;
+                }
+                KubectlGetResource::Services { global, all } => {
+                    let mut args = global.to_args();
+                    if all {
+                        args.push("-A".to_string());
+                    }
+                    container::run(container::ContainerCmd::KubectlServices, &args, cli.verbose)?;
+                }
+                KubectlGetResource::Other(args) => {
+                    let mut full_args: Vec<OsString> = vec!["get".into()];
+                    full_args.extend(args);
+                    container::run_kubectl_passthrough(&full_args, cli.verbose)?;
+                }
+            },
             KubectlCommands::Other(args) => {
                 container::run_kubectl_passthrough(&args, cli.verbose)?;
             }
@@ -2383,14 +2432,8 @@ mod tests {
 
     #[test]
     fn test_kubectl_pods_context() {
-        let cli = Cli::try_parse_from([
-            "rtk",
-            "kubectl",
-            "pods",
-            "--context",
-            "my-cluster",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["rtk", "kubectl", "pods", "--context", "my-cluster"]).unwrap();
         match cli.command {
             Commands::Kubectl {
                 command: KubectlCommands::Pods { global, all },
@@ -2500,6 +2543,113 @@ mod tests {
     }
 
     #[test]
+    fn test_kubectl_get_pods_routes_with_context() {
+        let cli = Cli::try_parse_from([
+            "rtk",
+            "kubectl",
+            "get",
+            "pods",
+            "--context",
+            "prod",
+            "-n",
+            "default",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Kubectl {
+                command:
+                    KubectlCommands::Get {
+                        resource: KubectlGetResource::Pods { global, all },
+                    },
+            } => {
+                assert_eq!(global.context.as_deref(), Some("prod"));
+                assert_eq!(global.namespace.as_deref(), Some("default"));
+                assert!(!all);
+                let args = global.to_args();
+                assert_eq!(args, vec!["--context", "prod", "-n", "default"]);
+            }
+            _ => panic!("Expected Kubectl Get Pods command"),
+        }
+    }
+
+    #[test]
+    fn test_kubectl_get_services_with_selector() {
+        let cli = Cli::try_parse_from([
+            "rtk",
+            "kubectl",
+            "get",
+            "services",
+            "-l",
+            "app=web",
+            "--context",
+            "staging",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Kubectl {
+                command:
+                    KubectlCommands::Get {
+                        resource: KubectlGetResource::Services { global, all },
+                    },
+            } => {
+                assert_eq!(global.selector.as_deref(), Some("app=web"));
+                assert_eq!(global.context.as_deref(), Some("staging"));
+                assert!(!all);
+                let args = global.to_args();
+                assert_eq!(args, vec!["--context", "staging", "-l", "app=web"]);
+            }
+            _ => panic!("Expected Kubectl Get Services command"),
+        }
+    }
+
+    #[test]
+    fn test_kubectl_get_pods_all_namespaces() {
+        let cli = Cli::try_parse_from([
+            "rtk",
+            "kubectl",
+            "get",
+            "pods",
+            "-A",
+            "--kubeconfig",
+            "/tmp/kube.conf",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Kubectl {
+                command:
+                    KubectlCommands::Get {
+                        resource: KubectlGetResource::Pods { global, all },
+                    },
+            } => {
+                assert!(all);
+                assert_eq!(global.kubeconfig.as_deref(), Some("/tmp/kube.conf"));
+            }
+            _ => panic!("Expected Kubectl Get Pods command"),
+        }
+    }
+
+    #[test]
+    fn test_kubectl_get_unknown_resource_passthrough() {
+        let cli =
+            Cli::try_parse_from(["rtk", "kubectl", "get", "deployments", "-n", "prod"]).unwrap();
+        match cli.command {
+            Commands::Kubectl {
+                command:
+                    KubectlCommands::Get {
+                        resource: KubectlGetResource::Other(args),
+                    },
+            } => {
+                let args_str: Vec<_> = args
+                    .iter()
+                    .map(|a| a.to_string_lossy().to_string())
+                    .collect();
+                assert_eq!(args_str, vec!["deployments", "-n", "prod"]);
+            }
+            _ => panic!("Expected Kubectl Get Other command"),
+        }
+    }
+
+    #[test]
     fn test_meta_commands_reject_bad_flags() {
         // RTK meta-commands should produce parse errors (not fall through to raw execution).
         // Skip "proxy" because it uses trailing_var_arg (accepts any args by design).
@@ -2518,14 +2668,8 @@ mod tests {
 
     #[test]
     fn test_kubectl_services_selector() {
-        let cli = Cli::try_parse_from([
-            "rtk",
-            "kubectl",
-            "services",
-            "-l",
-            "tier=frontend",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["rtk", "kubectl", "services", "-l", "tier=frontend"]).unwrap();
         match cli.command {
             Commands::Kubectl {
                 command: KubectlCommands::Services { global, all },
