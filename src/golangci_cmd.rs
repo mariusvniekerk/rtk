@@ -110,18 +110,21 @@ fn has_user_format_flag(args: &[String]) -> bool {
 pub fn run(args: &[String], verbose: u8) -> Result<()> {
     let timer = tracking::TimedExecution::start();
 
-    let use_json = is_run_subcommand(args);
+    let is_run = is_run_subcommand(args);
 
     let mut cmd = Command::new("golangci-lint");
+    // Tracks whether RTK injected a JSON flag (vs user-provided or non-run passthrough)
     let mut json_tmp_path: Option<std::path::PathBuf> = None;
+    let mut rtk_injected_json = false;
 
-    if use_json {
+    if is_run {
         let has_format = has_user_format_flag(args);
         let run_args: Vec<&String> = args.iter().filter(|a| a.as_str() != "run").collect();
 
         cmd.arg("run");
 
         if !has_format {
+            rtk_injected_json = true;
             let major = detect_major_version_from_binary();
 
             match major {
@@ -172,16 +175,16 @@ pub fn run(args: &[String], verbose: u8) -> Result<()> {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let raw = format!("{}\n{}", stdout, stderr);
 
-    let filtered = if use_json {
+    let filtered = if rtk_injected_json {
         // If we wrote JSON to a temp file (v2), read from there; otherwise parse stdout (v1)
-        let json_content = if let Some(ref tmp) = json_tmp_path {
-            let content = std::fs::read_to_string(tmp).unwrap_or_default();
+        if let Some(ref tmp) = json_tmp_path {
+            let content = std::fs::read_to_string(tmp)
+                .context("Failed to read golangci-lint JSON output from temp file");
             let _ = std::fs::remove_file(tmp);
-            content
+            filter_golangci_json(&content.unwrap_or_default())
         } else {
-            stdout.to_string()
-        };
-        filter_golangci_json(&json_content)
+            filter_golangci_json(&stdout)
+        }
     } else {
         stdout.trim().to_string()
     };
@@ -229,22 +232,14 @@ fn filter_golangci_json(output: &str) -> String {
 
     let total_issues = issues.len();
 
-    // Count unique files
-    let unique_files: std::collections::HashSet<_> =
-        issues.iter().map(|i| &i.pos.filename).collect();
-    let total_files = unique_files.len();
-
-    // Group by linter
+    // Single pass: group by linter and by file
     let mut by_linter: HashMap<String, usize> = HashMap::new();
-    for issue in &issues {
-        *by_linter.entry(issue.from_linter.clone()).or_insert(0) += 1;
-    }
-
-    // Group by file
     let mut by_file: HashMap<&str, usize> = HashMap::new();
     for issue in &issues {
+        *by_linter.entry(issue.from_linter.clone()).or_insert(0) += 1;
         *by_file.entry(&issue.pos.filename).or_insert(0) += 1;
     }
+    let total_files = by_file.len();
 
     let mut file_counts: Vec<_> = by_file.iter().collect();
     file_counts.sort_by(|a, b| b.1.cmp(a.1));
