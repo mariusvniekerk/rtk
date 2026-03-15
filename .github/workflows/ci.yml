@@ -369,3 +369,37 @@ jobs:
             echo "::warning::Unexpected status '${STATUS}' — skipping"
             echo "Unexpected AI response status: ${STATUS}" >> $GITHUB_STEP_SUMMARY
           fi
+
+  # ─── golangci-lint v1 + v2 integration tests ───
+
+  integration-golangci:
+    name: golangci-lint integration (v1 + v2)
+    needs: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Install golangci-lint v2 (latest)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b /usr/local/bin
+          echo "GOLANGCI_V2_BIN=/usr/local/bin/golangci-lint" >> $GITHUB_ENV
+          /usr/local/bin/golangci-lint version
+
+      - name: Install golangci-lint v1 (1.62.2)
+        run: |
+          curl -sSfL https://github.com/golangci/golangci-lint/releases/download/v1.62.2/golangci-lint-1.62.2-linux-amd64.tar.gz | tar xz
+          mv golangci-lint-1.62.2-linux-amd64/golangci-lint /usr/local/bin/golangci-lint-v1
+          echo "GOLANGCI_V1_BIN=/usr/local/bin/golangci-lint-v1" >> $GITHUB_ENV
+          /usr/local/bin/golangci-lint-v1 version
+
+      - name: Run golangci-lint integration tests
+        run: cargo test "test_integration" -- --ignored
